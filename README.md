@@ -31,6 +31,7 @@ A safer orm base on [GORM](https://github.com/go-gorm/gorm), aims to be develope
   - [API Examples](#api-examples)
     - [Generate](#generate)
       - [Generate Model](#generate-model)
+      - [Data Mapping](#data-mapping)
     - [Field Expression](#field-expression)
       - [Create Field](#create-field)
     - [CRUD API](#crud-api)
@@ -59,6 +60,7 @@ A safer orm base on [GORM](https://github.com/go-gorm/gorm), aims to be develope
         - [SubQuery](#subquery)
           - [From SubQuery](#from-subquery)
           - [Update from SubQuery](#update-from-subquery)
+          - [Update multiple columns from SubQuery](#update-multiple-columns-from-subquery)
         - [Transaction](#transaction)
           - [Nested Transactions](#nested-transactions)
           - [Transactions by manual](#transactions-by-manual)
@@ -113,6 +115,7 @@ A safer orm base on [GORM](https://github.com/go-gorm/gorm), aims to be develope
       - [Smart select fields](#smart-select-fields)
     - [Advanced Topics](#advanced-topics)
       - [Hints](#hints)
+  - [Binary](#binary)
   - [Maintainers](#maintainers)
   - [Contributing](#contributing)
   - [License](#license)
@@ -156,8 +159,10 @@ func main() {
         /* Mode: gen.WithoutContext|gen.WithDefaultQuery*/
         //if you want the nullable field generation property to be pointer type, set FieldNullable true
         /* FieldNullable: true,*/
-        //if you want to generate index tags from the database, set FieldWithIndexTag true
+        //if you want to generate index tags from database, set FieldWithIndexTag true
         /* FieldWithIndexTag: true,*/
+        //if you want to generate type tags from database, set FieldWithTypeTag true
+        /* FieldWithTypeTag: true,*/
         //if you need unit tests for query code, set WithUnitTest true
         /* WithUnitTest: true, */
     })
@@ -227,27 +232,50 @@ g.GenerateModelAs("people", "People")
 
 // add option to ignore field
 g.GenerateModel("people", gen.FieldIgnore("address"), gen.FieldType("id", "int64"))
+
+// generate all tables, ex: g.ApplyBasic(g.GenerateAllTable()...)
+g.GenerateAllTable()
 ```
 
 Field Generate **Options**
 
 ```go
-FieldNew         // create new field
-FieldIgnore      // ignore field
-FieldIgnoreReg   // ignore field (match with regexp)
-FieldRename      // rename field in struct
-FieldType        // specify field type
-FieldTypeReg     // specify field type (match with regexp)
-FieldTag         // specify gorm and json tag
-FieldJSONTag     // specify json tag
-FieldGORMTag     // specify gorm tag
-FieldNewTag      // append new tag
-FieldTrimPrefix  // trim column prefix
-FieldTrimSuffix  // trim column suffix
-FieldAddPrefix   // add prefix to struct member's name
-FieldAddSuffix   // add suffix to struct member's name
-FieldRelate      // specify relationship with other tables
-FieldRelateModel // specify relationship with exist models
+FieldNew           // create new field
+FieldIgnore        // ignore field
+FieldIgnoreReg     // ignore field (match with regexp)
+FieldRename        // rename field in struct
+FieldType          // specify field type
+FieldTypeReg       // specify field type (match with regexp)
+FieldTag           // specify gorm and json tag
+FieldJSONTag       // specify json tag
+FieldGORMTag       // specify gorm tag
+FieldNewTag        // append new tag
+FieldNewTagWithNS  // specify new tag with name strategy
+FieldTrimPrefix    // trim column prefix
+FieldTrimSuffix    // trim column suffix
+FieldAddPrefix     // add prefix to struct member's name
+FieldAddSuffix     // add suffix to struct member's name
+FieldRelate        // specify relationship with other tables
+FieldRelateModel   // specify relationship with exist models
+```
+
+#### Data Mapping
+
+Specify data mapping relationship to be whatever you want.
+
+```go
+dataMap := map[string]func(detailType string) (dataType string){
+  "int": func(detailType string) (dataType string) { return "int64" },
+  // bool mapping
+  "tinyint": func(detailType string) (dataType string) {
+    if strings.HasPrefix(detailType, "tinyint(1)") {
+      return "bool"
+    }
+    return "int8"
+  },
+}
+
+g.WithDataTypeMap(dataMap)
 ```
 
 ### Field Expression
@@ -256,7 +284,7 @@ FieldRelateModel // specify relationship with exist models
 
 Actually, you're not supposed to create a new field variable, cause it will be accomplished in generated code.
 
-| Field Type | Detail Type           | Crerate Function               | Supported Query Method                                       |
+| Field Type | Detail Type           | Create Function               | Supported Query Method                                       |
 | ---------- | --------------------- | ------------------------------ | ------------------------------------------------------------ |
 | generic    | field                 | NewField                       | IsNull/IsNotNull/Count/Eq/Neq/Gt/Gte/Lt/Lte/Like             |
 | int        | int/int8/.../int64    | NewInt/NewInt8/.../NewInt64    | Eq/Neq/Gt/Gte/Lt/Lte/In/NotIn/Between/NotBetween/Like/NotLike/Add/Sub/Mul/Div/Mod/FloorDiv/RightShift/LeftShift/BitXor/BitAnd/BitOr/BitFlip |
@@ -734,6 +762,31 @@ u.WithContext(ctx).Update(u.CompanyName, c.Select(c.Name).Where(c.ID.EqCol(u.Com
 // UPDATE "users" SET "company_name" = (SELECT name FROM companies WHERE companies.id = users.company_id);
 
 u.WithContext(ctx).Where(u.Name.Eq("modi")).Update(u.CompanyName, c.Select(c.Name).Where(c.ID.EqCol(u.CompanyID)))
+```
+
+###### Update multiple columns from SubQuery
+
+Update multiple columns by using SubQuery (for MySQL):
+
+```go
+u := query.Use(db).User
+c := query.Use(db).Company
+
+ua := u.As("u")
+ca := u.As("c")
+
+ua.WithContext(ctx).UpdateFrom(ca.WithContext(ctx).Select(c.ID, c.Address, c.Phone).Where(c.ID.Gt(100))).
+Where(ua.CompanyID.EqCol(ca.ID)).
+UpdateSimple(
+  ua.Address.SetCol(ca.Address),
+  ua.Phone.SetCol(ca.Phone),
+)
+// UPDATE `users` AS `u`,(
+//   SELECT `company`.`id`,`company`.`address`,`company`.`phone` 
+//   FROM `company` WHERE `company`.`id` > 100 AND `company`.`deleted_at` IS NULL
+// ) AS `c` 
+// SET `u`.`address`=`c`.`address`,`c`.`phone`=`c`.`phone`,`updated_at`='2021-11-11 11:11:11.111'
+// WHERE `u`.`company_id` = `c`.`id`
 ```
 
 ##### Transaction
@@ -1845,9 +1898,50 @@ users, err := u.WithContext(ctx).Clauses(hints.ForceIndex("idx_user_name", "idx_
 // SELECT * FROM `users` FORCE INDEX FOR JOIN (`idx_user_name`,`idx_user_id`)"
 ```
 
+## Binary
+
+Install GEN as a binary tool:
+
+```bash
+go install gorm.io/gen/tools/gentool@latest
+```
+
+usage:
+
+```bash
+$ gentool -h
+Usage of gentool:
+  -db string
+      input mysql or postgres or sqlite or sqlserver. consult[https://gorm.io/docs/connecting_to_the_database.html] (default "mysql")
+  -dsn string
+      consult[https://gorm.io/docs/connecting_to_the_database.html]
+  -fieldNullable
+      generate with pointer when field is nullable
+  -fieldWithIndexTag
+      generate field with gorm index tag
+  -fieldWithTypeTag
+      generate field with gorm column type tag
+  -modelPkgName string
+      generated model code's package name
+  -outFile string
+      query code file name, default: gen.go
+  -outPath string
+      specify a directory for output (default "./dao/query")
+  -tables string
+      enter the required data table or leave it blank
+  -withUnitTest
+      generate unit test for query code
+```
+
+example:
+
+``` bash
+gentool -dsn "user:pwd@tcp(127.0.0.1:3306)/database?charset=utf8mb4&parseTime=True&loc=Local" -tables "orders,doctor"
+```
+
 ## Maintainers
 
-[@riverchu](https://github.com/riverchu) [@idersec](https://github.com/idersec) [@qqxhb](https://github.com/qqxhb)
+[@riverchu](https://github.com/riverchu) [@idersec](https://github.com/idersec) [@qqxhb](https://github.com/qqxhb) [@dino-ma](https://github.com/dino-ma)
 
 [@jinzhu](https://github.com/jinzhu)
 
