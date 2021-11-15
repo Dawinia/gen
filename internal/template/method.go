@@ -261,7 +261,7 @@ func Test_{{.NewStructName}}Query(t *testing.T) {
 		t.Error("FindInBatch() on table <{{.TableName}}> fail:", err)
 	}
 
-	err = do.Where(primaryKey.IsNotNull()).FindInBatches([]*{{.StructInfo.Package}}.{{.StructName}}{}, 10, func(tx gen.Dao, batch int) error { return nil })
+	err = do.Where(primaryKey.IsNotNull()).FindInBatches(&[]*{{.StructInfo.Package}}.{{.StructName}}{}, 10, func(tx gen.Dao, batch int) error { return nil })
 	if err != nil {
 		t.Error("FindInBatches() on table <{{.TableName}}> fail:", err)
 	}
@@ -324,4 +324,21 @@ func Test_{{.NewStructName}}Query(t *testing.T) {
 		t.Error("Not/Or/Clauses on table <{{.TableName}}> fail:", err)
 	}
 }
+`
+
+const DIYMethod_TEST = `
+
+func Test_{{.TargetStruct}}_{{.MethodName}}(t *testing.T) {
+	{{.TargetStruct}} := new{{.OriginStruct.Type}}(db)
+	do := {{.TargetStruct}}.WithContext(context.Background()).Debug()
+	assert := assert.New(t)
+
+	for i, tt := range {{.OriginStruct.Type}}{{.MethodName}}TestCase {
+		t.Run("{{.MethodName}}_"+strconv.Itoa(i), func(t *testing.T) {
+			{{.GetTestResultParamInTmpl}} := do.{{.MethodName}}({{.GetTestParamInTmpl}})
+			{{.GetAssertInTmpl}}
+		})
+	}
+}
+
 `
