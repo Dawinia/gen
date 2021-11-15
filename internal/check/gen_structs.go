@@ -58,10 +58,15 @@ func GenBaseStructs(db *gorm.DB, conf model.DBConf) (bases *BaseStruct, err erro
 
 	modifyOpts, filterOpts, createOpts := conf.SortOpt()
 	for _, field := range columns {
+		field.SetDataTypeMap(conf.DataTypeMap)
 		m := field.ToMember(conf.FieldNullable)
 
 		if filterMember(m, filterOpts) == nil {
 			continue
+		}
+
+		if !conf.FieldWithTypeTag { // remove type tag if FieldWithTypeTag == false
+			m.GORMTag = strings.ReplaceAll(m.GORMTag, ";type:"+field.ColumnType, "")
 		}
 
 		m = modifyMember(m, modifyOpts)
@@ -87,8 +92,6 @@ func GenBaseStructs(db *gorm.DB, conf model.DBConf) (bases *BaseStruct, err erro
 				}
 			}
 			m.Type = strings.ReplaceAll(m.Type, modelPkg+".", "") // remove modelPkg in field's Type, avoid import error
-		} else { // Relation Field do not need SchemaName convert
-			m.Name = db.NamingStrategy.SchemaName(m.Name)
 		}
 
 		base.Members = append(base.Members, m)

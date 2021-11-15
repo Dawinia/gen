@@ -146,13 +146,17 @@ func ({{.S}} {{.NewStructName}}Do) Find() ([]*{{.StructInfo.Package}}.{{.StructI
 	return result.([]*{{.StructInfo.Package}}.{{.StructInfo.Type}}), err
 }
 
-func ({{.S}} {{.NewStructName}}Do) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) ([]*{{.StructInfo.Package}}.{{.StructInfo.Type}}, error) {
-	result, err := {{.S}}.DO.FindInBatch(batchSize, fc)
-	return result.([]*{{.StructInfo.Package}}.{{.StructInfo.Type}}), err
+func ({{.S}} {{.NewStructName}}Do) FindInBatch(batchSize int, fc func(tx gen.Dao, batch int) error) (results []*{{.StructInfo.Package}}.{{.StructInfo.Type}}, err error) {
+	buf := make([]*{{.StructInfo.Package}}.{{.StructInfo.Type}}, 0, batchSize)
+	err = {{.S}}.DO.FindInBatches(&buf, batchSize, func(tx gen.Dao, batch int) error {
+		defer func() { results = append(results, buf...) }()
+		return fc(tx, batch)
+	})
+	return results, err
 }
 
 func ({{.S}} {{.NewStructName}}Do) FindInBatches(result *[]*{{.StructInfo.Package}}.{{.StructInfo.Type}}, batchSize int, fc func(tx gen.Dao, batch int) error) error {
-	return {{.S}}.DO.FindInBatches(&result, batchSize, fc)
+	return {{.S}}.DO.FindInBatches(result, batchSize, fc)
 }
 
 func ({{.S}} {{.NewStructName}}Do) Attrs(attrs ...field.AssignExpr) *{{.NewStructName}}Do {
@@ -197,6 +201,16 @@ func ({{.S}} {{.NewStructName}}Do) FindByPage(offset int, limit int) (result []*
 	return
 }
 
+func ({{.S}} {{.NewStructName}}Do) ScanByPage(result interface{}, offset int, limit int) (count int64, err error) {
+	count, err = {{.S}}.Count()
+	if err != nil {
+		return
+	}
+
+	err = {{.S}}.Offset(offset).Limit(limit).Scan(result)
+	return
+}
+
 func ({{.S}} *{{.NewStructName}}Do) withDO(do gen.Dao) (*{{.NewStructName}}Do) {
 	{{.S}}.DO = *do.(*gen.DO)
 	return {{.S}}
@@ -207,11 +221,15 @@ func ({{.S}} *{{.NewStructName}}Do) withDO(do gen.Dao) (*{{.NewStructName}}Do) {
 const CRUDMethod_TEST = `
 func init() {
 	InitializeDB()
-	db.AutoMigrate(&{{.StructInfo.Package}}.{{.StructName}}{})
+	err := db.AutoMigrate(&{{.StructInfo.Package}}.{{.StructName}}{})
+	if err != nil{
+		fmt.Printf("Error: AutoMigrate(&{{.StructInfo.Package}}.{{.StructName}}{}) fail: %s", err)
+	}
 }
 
 func Test_{{.NewStructName}}Query(t *testing.T) {
 	{{.NewStructName}} := new{{.StructName}}(db)
+	{{.NewStructName}} = *{{.NewStructName}}.As({{.NewStructName}}.TableName())
 	do := {{.NewStructName}}.WithContext(context.Background()).Debug()
 
 	primaryKey := field.NewString({{.NewStructName}}.TableName(), clause.PrimaryKey)
@@ -296,6 +314,11 @@ func Test_{{.NewStructName}}Query(t *testing.T) {
 		t.Error("FindByPage() on table <{{.TableName}}> fail:", err)
 	}
 	
+	_, err = do.ScanByPage(&{{.StructInfo.Package}}.{{.StructName}}{}, 0, 1)
+	if err != nil {
+		t.Error("ScanByPage() on table <{{.TableName}}> fail:", err)
+	}
+
 	_, err = do.Attrs(primaryKey).Assign(primaryKey).FirstOrInit()
 	if err != nil {
 		t.Error("FirstOrInit() on table <{{.TableName}}> fail:", err)
